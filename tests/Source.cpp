@@ -1,54 +1,46 @@
 #include <iostream>
 #include <string>
-#include "Profiler/Profiler.cpp"
-#include "Profiler/Profiler.h"
 #include "ECS.h"
 using namespace ECS;
 
-struct Test : public ECS::Component<Test>
+
+struct Comp : public Component<Comp>
 {
-    float value;
-    Test(float value) :value(value) {}
+    std::string name;
+
+    Comp(std::string name) : name(name) {}
 };
 
-struct Test2 : public ECS::Component<Test2>
+struct Comp1 : public Component<Comp1>
 {
-    float value;
-    Test2(float value) :value(value) {}
+    std::string name;
+
+    Comp1(std::string name) : name(name) {}
 };
-
-ENTITY(Test, Test2);
-
-struct TestSystem : public ECS::System<Test>
+struct Comp2 : public Component<Comp2>
 {
-    static float Run()
-    {
-        float sum = 0;
-        for (auto&& i : components)
-        {
-            Test2& o = i.GetComponent<Test2>();
-            i.value += o.value;
-            sum += i.value;
-        }
+    std::string name;
 
-        return 0.1f;
-    }
+    Comp2(std::string name) : name(name) {}
 };
 
 int main()
 {
-    std::vector<Entity> entities(1024 * 1024);
-    for (auto&& i : entities)
-        i = Entity::AddEntity(Test(0.1f), Test2(0.3f));
+    ECS::AddEntity(Comp("impostor"), Comp2("amogus"));
+    ECS::AddEntity(Comp("impostor1"));
 
-    while (true)
+
+    for (int i = 0; i < ArchetypePool::archetypes[0].entityCount; i++)
     {
-        Profiler::BeginFrame();
-        {
-            PROFILE_NAMED_FUNCTION("Test");
-            TestSystem::Run();
-        }
-        Profiler::EndFrame();
+        std::cout
+            << ArchetypePool::archetypes[0].GetComponent<Comp>(i).name << '\n'
+            << ArchetypePool::archetypes[0].GetComponent<Comp2>(i).name << '\n';
+    }
+
+    for (int i = 0; i < ArchetypePool::archetypes[1].entityCount; i++)
+    {
+        std::cout
+            << ArchetypePool::archetypes[1].GetComponent<Comp>(i).name << '\n';
     }
 
     return 0;
