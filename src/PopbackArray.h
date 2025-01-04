@@ -1,3 +1,5 @@
+#include <utility>
+
 class PopbackArray
 {
     void* m_data;
@@ -30,4 +32,9 @@ public:
     template<typename T>
     const T& at(int index) const { return *(T*) at(index, sizeof(T)); }
 
+    template <typename T>
+    void emplace_back(T&& element, int size)
+    {
+        new(&at<T>(size)) T(std::move(element));
+    }
 };

@@ -46,41 +46,44 @@ struct Particle : public Component<Particle>
 
 int main()
 {
-    std::vector<Entity> entities(1024 * 4);
-    for (int i = 0; i < entities.size(); i++)
-    {
-        entities[i] = Entity(Particle());
-    }
 
-    std::vector<Archetype*> archetypes = ArchetypePool::GetContaining<Particle>();
+    // std::cout << entity.GetComponent<Name>().str << '\n';
 
-    while (true)
-    {
-        Profiler::BeginFrame();
-        Profiler::AddFunction("Single Component Archetypes")->BeginSample();
+    // std::vector<Entity> entities(1024 * 2);
+    // for (int i = 0; i < entities.size(); i++)
+    // {
+    //     entities[i] = Entity(Particle());
+    // }
 
-        for (auto&& i : archetypes)
-        {
-            for (auto&& particleA : i->GetComponents<Particle>())
-            {
-                vec2 acceleration;
+    // std::vector<Archetype*> archetypes = ArchetypePool::GetContaining<Particle>();
 
-                for (auto&& i_ : archetypes)
-                {
-                    for (auto&& particleB : i_->GetComponents<Particle>())
-                    {
-                        acceleration += particleB.position - particleA.position;
-                    }
-                }
+    // while (true)
+    // {
+    //     Profiler::BeginFrame();
+    //     Profiler::AddFunction("Single Component")->BeginSample();
 
-                acceleration += -particleA.position;
+    //     for (auto&& i : archetypes)
+    //     {
+    //         for (auto&& particleA : i->GetComponents<Particle>())
+    //         {
+    //             vec2 acceleration;
 
-                particleA.velocity += acceleration;
-                particleA.position += particleA.velocity;
-            }
-        }
-        Profiler::GetFunction("Single Component Archetypes")->EndSample();
-        Profiler::EndFrame();
-    }
+    //             for (auto&& i_ : archetypes)
+    //             {
+    //                 for (auto&& particleB : i_->GetComponents<Particle>())
+    //                 {
+    //                     acceleration += particleB.position - particleA.position;
+    //                 }
+    //             }
+
+    //             acceleration += -particleA.position;
+
+    //             particleA.velocity += acceleration;
+    //             particleA.position += particleA.velocity;
+    //         }
+    //     }
+    //     Profiler::GetFunction("Single Component")->EndSample();
+    //     Profiler::EndFrame();
+    // }
     return 0;
 }

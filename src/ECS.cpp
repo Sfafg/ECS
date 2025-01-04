@@ -1,5 +1,4 @@
 #include "ECS.h"
-#include <math.h>
 #include <cstring>
 namespace ECS
 {
@@ -21,6 +20,11 @@ namespace ECS
         return byteSizes[id];
     }
 
+    std::function<void(void*)> ComponentInfo::GetDestructor(int id)
+    {
+        assert(0 <= id && id < destructors.size() && "Invalid Component ID");
+        return destructors[id];
+    }
 
     Entity::Entity() :
         archetypeID(-1),
@@ -75,10 +79,6 @@ namespace ECS
 
     ComponentMask::ComponentMask() {}
 
-    ComponentMask::ComponentMask(int componentCount) :
-        field(std::vector<int>(ceil(componentCount / (float) sizeof(int) / 8.0f)))
-    {}
-
     void ComponentMask::SetBit(int index)
     {
         GetChunk(index) |= 1 << index;
@@ -102,7 +102,7 @@ namespace ECS
     int ComponentMask::CountSetBits() const
     {
         int count = 0;
-        for (int i = 0; i < field.size(); i++)
+        for (int i = 0; i < ComponentInfo::GetFieldSize(); i++)
         {
             int n = field[i];
             while (n)
@@ -116,21 +116,21 @@ namespace ECS
 
     ComponentMask& ComponentMask::operator&=(const ComponentMask& rhs)
     {
-        for (int i = 0; i < field.size(); i++)
+        for (int i = 0; i < ComponentInfo::GetFieldSize(); i++)
             field[i] &= rhs.field[i];
         return *this;
     }
 
     ComponentMask& ComponentMask::operator|=(const ComponentMask& rhs)
     {
-        for (int i = 0; i < field.size(); i++)
+        for (int i = 0; i < ComponentInfo::GetFieldSize(); i++)
             field[i] |= rhs.field[i];
         return *this;
     }
 
     ComponentMask& ComponentMask::operator^=(const ComponentMask& rhs)
     {
-        for (int i = 0; i < field.size(); i++)
+        for (int i = 0; i < ComponentInfo::GetFieldSize(); i++)
             field[i] ^= rhs.field[i];
         return *this;
     }
@@ -158,16 +158,21 @@ namespace ECS
 
     bool ComponentMask::operator==(const ComponentMask& rhs) const
     {
-        return field == rhs.field;
+        for (int i = 0; i < ComponentInfo::GetFieldSize(); i++)
+            if (field[i] != rhs.field[i])
+                return false;
 
+        return true;
     }
     int& ComponentMask::GetChunk(int index)
     {
+        assert((index < ComponentInfo::GetMaxComponentCount()) && "To much components set max component count higher");
         return field[index / sizeof(int) / 8];
     }
 
     const int& ComponentMask::GetChunk(int index) const
     {
+        assert((index < ComponentInfo::GetMaxComponentCount()) && "To much components set max component count higher");
         return field[index / sizeof(int) / 8];
     }
 
@@ -280,7 +285,11 @@ namespace ECS
             int componentID = denseComponentMap[i];
             if (newArchetype->componentMask.GetBit(componentID))
                 newArchetype->sparseComponentArray[componentID].append(sparseComponentArray->at(index, ComponentInfo::GetByteSize(componentID)), newArchetype->entityCount, ComponentInfo::GetByteSize(componentID));
-
+            else
+            {
+                void* component = sparseComponentArray[componentID].at(index, ComponentInfo::GetByteSize(componentID));
+                ComponentInfo::GetDestructor(componentID)(component);
+            }
             sparseComponentArray[componentID].pop(index, entityCount, ComponentInfo::GetByteSize(componentID));
         }
 
@@ -300,6 +309,8 @@ namespace ECS
         for (int i = 0; i < denseComponentMap.size(); i++)
         {
             int componentID = denseComponentMap[i];
+            void* component = sparseComponentArray[componentID].at(index, ComponentInfo::GetByteSize(componentID));
+            ComponentInfo::GetDestructor(componentID)(component);
             sparseComponentArray[componentID].pop(index, entityCount, ComponentInfo::GetByteSize(componentID));
         }
         entityReferences.pop(index, entityCount, sizeof(Entity*));
