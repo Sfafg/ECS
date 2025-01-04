@@ -7,7 +7,7 @@ set(CMAKE_EXE_LINKER_FLAGS "-static")
 set(TESTS_ROOT "${PROJECT_SOURCE_DIR}/tests")
 set(SRC_ROOT "${PROJECT_SOURCE_DIR}/src")
 
-add_executable(ECSTest ${SRC_ROOT}/ECS.cpp ${TESTS_ROOT}/ECSTest.cpp)
+add_executable(ECSTest ${SRC_ROOT}/ECS.cpp ${SRC_ROOT}/PopbackArray.cpp ${TESTS_ROOT}/ECSTest.cpp)
 target_include_directories(ECSTest PUBLIC ${SRC_ROOT})
 
 include(CTest)

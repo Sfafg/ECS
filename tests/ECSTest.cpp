@@ -1,40 +1,86 @@
 #include <iostream>
 #include <string>
 #include "ECS.h"
+#include "Profiler.h"
+#include "Profiler.cpp"
+#include "math.h"
+
 using namespace ECS;
 
-
-struct Comp : public Component<Comp>
+struct vec2
 {
-    std::string name;
+    float x, y;
+    vec2() :x(0), y(0) {}
+    vec2(float x, float y) :x(x), y(y) {}
+    void operator+=(const vec2& rhs) { x += rhs.x; y += rhs.y; }
+    vec2 operator+(const vec2& rhs) { return vec2(x + rhs.x, y + rhs.y); }
+    vec2 operator-(const vec2& rhs) { return vec2(x - rhs.x, y - rhs.y); }
+    vec2 operator-() { return vec2(-x, -y); }
 
-    Comp(std::string name) : name(name) {}
+    float sqrLength()
+    {
+        return x * x + y * y;
+
+    }
+    float length()
+    {
+        return sqrt(sqrLength());
+    }
+    void normalize()
+    {
+        float l = length();
+        if (l == 0) return;
+        x /= l;
+        y /= l;
+    }
 };
 
-struct Comp1 : public Component<Comp1>
+struct Particle : public Component<Particle>
 {
-    int a;
+    vec2 position;
+    vec2 velocity;
 
-    Comp1(int a) : a(a) {}
-};
-
-struct Comp2 : public Component<Comp2>
-{
-    float a;
-
-    Comp2(float a) : a(a) {}
+    Particle() :position((float) rand() / (float) RAND_MAX * 10 - 5, (float) rand() / (float) RAND_MAX * 10 - 5) {}
+    Particle(vec2 position, vec2 velocity) :position(position), velocity(velocity) {}
 };
 
 int main()
 {
-    Entity a(Comp("sus"));
-    Entity b(Comp("sus2"));
-    Entity c(Comp("sus3"));
-    b.~Entity();
-    // a.AddComponent(Comp1(10));
-    std::cout << a.GetComponent<Comp>().name << '\n';
-    std::cout << b.GetComponent<Comp>().name << '\n';
-    std::cout << c.GetComponent<Comp>().name << '\n';
+    std::vector<Entity> entities(1024 * 4);
+    for (int i = 0; i < entities.size(); i++)
+    {
+        entities[i] = Entity(Particle());
+    }
 
+    std::vector<Archetype*> archetypes = ArchetypePool::GetContaining<Particle>();
+
+    while (true)
+    {
+        Profiler::BeginFrame();
+        Profiler::AddFunction("Single Component Archetypes")->BeginSample();
+
+        for (auto&& i : archetypes)
+        {
+            for (auto&& particleA : i->GetComponents<Particle>())
+            {
+                vec2 acceleration;
+
+                for (auto&& i_ : archetypes)
+                {
+                    for (auto&& particleB : i_->GetComponents<Particle>())
+                    {
+                        acceleration += particleB.position - particleA.position;
+                    }
+                }
+
+                acceleration += -particleA.position;
+
+                particleA.velocity += acceleration;
+                particleA.position += particleA.velocity;
+            }
+        }
+        Profiler::GetFunction("Single Component Archetypes")->EndSample();
+        Profiler::EndFrame();
+    }
     return 0;
 }

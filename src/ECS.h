@@ -1,16 +1,27 @@
 #pragma once
+#include <iostream>
+#include <span>
 #include <vector>
+#include <functional>
 #include <concepts>
 #include <cassert>
+#include "PopbackArray.h"
 
 namespace ECS
 {
+    template <typename T>
+    concept DestructableComponent = requires {
+        { T::Destroy() };
+    };
     class ComponentInfo
     {
         static std::vector<int> byteSizes;
-        static int RegisterComponent(int byteSize);
+        static std::vector<std::function<void(void*)>> destructors;
+        static int RegisterComponent(int byteSize, std::function<void(void*)> destructor);
         template<typename T>
-        static int RegisterComponent() { return RegisterComponent(sizeof(T)); }
+        static int RegisterComponent() { return RegisterComponent(sizeof(T), nullptr); }
+        template<DestructableComponent T>
+        static int RegisterComponent() { return RegisterComponent(sizeof(T), T::Destroy); }
 
     public:
         static int GetCount();
@@ -20,6 +31,7 @@ namespace ECS
         friend class Component;
     };
     inline std::vector<int> ComponentInfo::byteSizes;
+    inline std::vector<std::function<void(void*)>> ComponentInfo::destructors;
 
     template <typename T>
     struct Component
@@ -49,10 +61,11 @@ namespace ECS
         template <typename T>
         void AddComponent(T&& component) const;
         template <typename T>
+        void RemoveComponent() const;
+        template <typename T>
         bool HasComponent() const { return HasComponent(T::id); }
         template <typename T>
         T& GetComponent() { return *(T*) GetComponent(T::id); }
-
         template <typename T>
         const T& GetComponent() const { return *(T*) GetComponent(T::id); }
 
@@ -60,17 +73,20 @@ namespace ECS
         bool HasComponent(int componentID) const;
         void* GetComponent(int componentID);
         const void* GetComponent(int componentID) const;
+
+        friend class Archetype;
     };
 
     class ComponentMask
     {
         std::vector<int> field;
     public:
-
         ComponentMask();
         ComponentMask(int componentCount);
 
         void SetBit(int index);
+        void UnsetBit(int index);
+        void ToggleBit(int index);
         bool GetBit(int index) const;
         int CountSetBits() const;
 
@@ -88,32 +104,11 @@ namespace ECS
         const int& GetChunk(int index) const;
     };
 
-    struct ComponentArray
-    {
-        void* components;
-
-        ComponentArray();
-        ComponentArray(ComponentArray&& rhs);
-        ComponentArray& operator=(ComponentArray&& rhs);
-        ~ComponentArray();
-
-        ComponentArray(const ComponentArray& rhs) = delete;
-        ComponentArray& operator=(const ComponentArray& rhs) = delete;
-
-        void insert(void* component, int index, int componentID);
-        void erase(int index, int count, int* size, int componentID);
-
-        void reserve(int oldCapacity, int newCapacity, int componentID);
-        void* at(int index, int componentID);
-        void set_at(int index, void* component, int componentID);
-        void* data();
-    };
-
     struct Archetype
     {
         ComponentMask componentMask;
-        ComponentArray* sparseComponentArray;
-        Entity** entityReferences;
+        PopbackArray* sparseComponentArray;
+        PopbackArray entityReferences;
         std::vector<int> denseComponentMap;
         int entityCount;
         int entityCapacity;
@@ -126,35 +121,102 @@ namespace ECS
         Archetype& operator=(const Archetype& rhs);
         ~Archetype();
 
-        void reserve(int newCapacity);
+        template<typename... TComponents>
+        void Push(Entity* entity, TComponents... components);
+        void MoveEntity(int index, Archetype* newArchetype);
+        void RemoveEntity(int index);
+        void Reserve(int newCapacity);
+
+        template<typename T>
+        std::span<T> GetComponents()
+        {
+            assert(componentMask.GetBit(T::id) && "Trying to access components that are not present on archetype");
+            return std::span<T>((T*) sparseComponentArray[T::id].data(), entityCount);
+        }
     };
 
-    struct ArchetypePool
+    class ArchetypePool
     {
         static std::vector<Archetype> archetypes;
 
+    public:
         static Archetype* AddArchetype(Archetype&& archetype);
-
+        static Archetype& Get(int index);
         static Archetype* GetArchetype(ComponentMask mask);
         static std::vector<Archetype*> GetContaining(ComponentMask mask);
+        template<typename... TComponents>
+        static std::vector<Archetype*> GetContaining()
+        {
+            ComponentMask mask(ComponentInfo::GetCount());
+            ((mask.SetBit(TComponents::id)), ...);
+            return GetContaining(mask);
+        }
+
+        friend Archetype;
     };
     inline std::vector<Archetype> ArchetypePool::archetypes;
+}
 
+namespace ECS
+{
     template<typename... TComponents>
-    Entity::Entity(TComponents&&... components)
+    Entity::Entity(TComponents&&... components) :
+        Entity()
     {
         ComponentMask mask(ComponentInfo::GetCount());
         ((mask.SetBit(TComponents::id)), ...);
-        Archetype* archetype;
+
+        Archetype* archetype = nullptr;
         if (!(archetype = ArchetypePool::GetArchetype(mask)))
             archetype = ArchetypePool::AddArchetype(Archetype(mask));
 
-        if (archetype->entityCount + 1 >= archetype->entityCapacity)
-            archetype->reserve((archetype->entityCapacity + 1) * 2);
+        archetype->Push(this, std::move(components)...);
+    }
 
-        ((archetype->sparseComponentArray[TComponents::id].insert(&components, archetype->entityCount, TComponents::id)), ...);
+    template <typename T>
+    void Entity::AddComponent(T&& component) const
+    {
+        Archetype& archetype = ArchetypePool::Get(archetypeID);
+        ComponentMask newMask = archetype.componentMask;
+        newMask.SetBit(T::id);
 
-        id = archetype->entityCount++;
-        archetypeID = archetype - &ArchetypePool::archetypes.front();
+        Archetype* newArchetype = nullptr;
+        if (!(newArchetype = ArchetypePool::GetArchetype(newMask)))
+            newArchetype = ArchetypePool::AddArchetype(Archetype(newMask));
+
+        archetype.MoveEntity(id, newArchetype);
+        newArchetype->sparseComponentArray[T::id].append(&component, newArchetype->entityCount, ComponentInfo::GetByteSize(T::id));
+    }
+
+    template <typename T>
+    void Entity::RemoveComponent() const
+    {
+        Archetype& archetype = ArchetypePool::Get(archetypeID);
+        ComponentMask newMask = archetype.componentMask;
+        newMask.UnsetBit(T::id);
+
+        Archetype* newArchetype = nullptr;
+        if (!(newArchetype = ArchetypePool::GetArchetype(newMask)))
+            newArchetype = ArchetypePool::AddArchetype(Archetype(newMask));
+
+        archetype.MoveEntity(id, newArchetype);
+    }
+
+    template<typename... TComponents>
+    void Archetype::Push(Entity* entity, TComponents... components)
+    {
+        ComponentMask mask(ComponentInfo::GetCount());
+        ((mask.SetBit(TComponents::id)), ...);
+        assert(mask == componentMask && "Archetype component mask does not match provided components");
+
+        if (entityCount + 1 >= entityCapacity)
+            Reserve((entityCapacity + 1) * 1.7);
+
+        ((sparseComponentArray[TComponents::id].append(&components, entityCount, ComponentInfo::GetByteSize(TComponents::id))), ...);
+
+        entity->id = entityCount;
+        entity->archetypeID = this - &ArchetypePool::archetypes[0];
+        entityReferences.append(entity, entityCount);
+        entityCount++;
     }
 }
