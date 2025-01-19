@@ -1,10 +1,16 @@
 #include "ECS.h"
 #include <cstring>
+#include <algorithm>
 namespace ECS
 {
-    int ComponentInfo::RegisterComponent(int byteSize, std::function<void(void*)> destructor)
+    std::vector<int> ComponentInfo::byteSizes = {};
+    std::vector<ComponentInfo::MoveConstructorPtr> ComponentInfo::moveConstructors = {};
+    std::vector<ComponentInfo::DestructorPtr> ComponentInfo::destructors = {};
+
+    int ComponentInfo::RegisterComponent(int byteSize, ComponentInfo::MoveConstructorPtr moveConstructor, ComponentInfo::DestructorPtr destructor)
     {
         byteSizes.push_back(byteSize);
+        moveConstructors.push_back(moveConstructor);
         destructors.push_back(destructor);
         return byteSizes.size() - 1;
     }
@@ -20,10 +26,16 @@ namespace ECS
         return byteSizes[id];
     }
 
-    std::function<void(void*)> ComponentInfo::GetDestructor(int id)
+    ComponentInfo::DestructorPtr ComponentInfo::GetDestructor(int id)
     {
         assert(0 <= id && id < destructors.size() && "Invalid Component ID");
         return destructors[id];
+    }
+
+    ComponentInfo::MoveConstructorPtr ComponentInfo::GetMoveConstructor(int id)
+    {
+        assert(0 <= id && id < moveConstructors.size() && "Invalid Component ID");
+        return moveConstructors[id];
     }
 
     Entity::Entity() :
@@ -36,6 +48,8 @@ namespace ECS
     {
         std::swap(archetypeID, rhs.archetypeID);
         std::swap(id, rhs.id);
+        if (archetypeID != -1)
+            ArchetypePool::Get(archetypeID).entityReferences.at<Entity*>(id) = this;
     }
 
     Entity& Entity::operator=(Entity&& rhs)
@@ -44,6 +58,8 @@ namespace ECS
         {
             std::swap(archetypeID, rhs.archetypeID);
             std::swap(id, rhs.id);
+            if (archetypeID != -1)
+                ArchetypePool::Get(archetypeID).entityReferences.at<Entity*>(id) = this;
         }
 
         return *this;
@@ -102,7 +118,7 @@ namespace ECS
     int ComponentMask::CountSetBits() const
     {
         int count = 0;
-        for (int i = 0; i < ComponentInfo::GetFieldSize(); i++)
+        for (int i = 0; i < fieldSize; i++)
         {
             int n = field[i];
             while (n)
@@ -116,21 +132,21 @@ namespace ECS
 
     ComponentMask& ComponentMask::operator&=(const ComponentMask& rhs)
     {
-        for (int i = 0; i < ComponentInfo::GetFieldSize(); i++)
+        for (int i = 0; i < fieldSize; i++)
             field[i] &= rhs.field[i];
         return *this;
     }
 
     ComponentMask& ComponentMask::operator|=(const ComponentMask& rhs)
     {
-        for (int i = 0; i < ComponentInfo::GetFieldSize(); i++)
+        for (int i = 0; i < fieldSize; i++)
             field[i] |= rhs.field[i];
         return *this;
     }
 
     ComponentMask& ComponentMask::operator^=(const ComponentMask& rhs)
     {
-        for (int i = 0; i < ComponentInfo::GetFieldSize(); i++)
+        for (int i = 0; i < fieldSize; i++)
             field[i] ^= rhs.field[i];
         return *this;
     }
@@ -158,7 +174,7 @@ namespace ECS
 
     bool ComponentMask::operator==(const ComponentMask& rhs) const
     {
-        for (int i = 0; i < ComponentInfo::GetFieldSize(); i++)
+        for (int i = 0; i < fieldSize; i++)
             if (field[i] != rhs.field[i])
                 return false;
 
@@ -166,13 +182,13 @@ namespace ECS
     }
     int& ComponentMask::GetChunk(int index)
     {
-        assert((index < ComponentInfo::GetMaxComponentCount()) && "To much components set max component count higher");
+        assert((index < ComponentInfo::maxComponentCount) && "To much components set max component count higher");
         return field[index / sizeof(int) / 8];
     }
 
     const int& ComponentMask::GetChunk(int index) const
     {
-        assert((index < ComponentInfo::GetMaxComponentCount()) && "To much components set max component count higher");
+        assert((index < ComponentInfo::maxComponentCount) && "To much components set max component count higher");
         return field[index / sizeof(int) / 8];
     }
 
@@ -206,25 +222,6 @@ namespace ECS
         std::swap(entityCapacity, rhs.entityCapacity);
     }
 
-    Archetype::Archetype(const Archetype& rhs)
-    {
-        componentMask = rhs.componentMask;
-        entityCount = rhs.entityCount;
-        entityCapacity = rhs.entityCount;
-        denseComponentMap = rhs.denseComponentMap;
-        sparseComponentArray = new PopbackArray[ComponentInfo::GetCount()];
-        entityReferences.reserve(0, entityCapacity, sizeof(Entity*));
-
-        for (int i = 0; i < denseComponentMap.size(); i++)
-        {
-            int index = denseComponentMap[i];
-            sparseComponentArray[index].reserve(0, entityCapacity, ComponentInfo::GetByteSize(index));
-            memcpy(sparseComponentArray[index].data(), rhs.sparseComponentArray[index].data(), entityCount * ComponentInfo::GetByteSize(index));
-        }
-
-        memcpy(entityReferences.data(), rhs.entityReferences.data(), sizeof(Entity*) * entityCount);
-    }
-
     Archetype& Archetype::operator=(Archetype&& rhs)
     {
         if (this != &rhs)
@@ -240,36 +237,22 @@ namespace ECS
         return *this;
     }
 
-    Archetype& Archetype::operator=(const Archetype& rhs)
-    {
-        if (this != &rhs)
-        {
-            delete[] sparseComponentArray;
-
-            componentMask = rhs.componentMask;
-            entityCount = rhs.entityCount;
-            entityCapacity = rhs.entityCount;
-            denseComponentMap = rhs.denseComponentMap;
-            sparseComponentArray = new PopbackArray[ComponentInfo::GetCount()];
-            entityReferences.reserve(0, entityCapacity, sizeof(Entity*));
-
-            for (int i = 0; i < denseComponentMap.size(); i++)
-            {
-                int index = denseComponentMap[i];
-                sparseComponentArray[index].reserve(0, entityCapacity, ComponentInfo::GetByteSize(index));
-                memcpy(sparseComponentArray[index].data(), rhs.sparseComponentArray[index].data(), entityCount * ComponentInfo::GetByteSize(index));
-            }
-
-            memcpy(entityReferences.data(), rhs.entityReferences.data(), sizeof(Entity*) * entityCount);
-        }
-
-        return *this;
-    }
-
     Archetype::~Archetype()
     {
         if (sparseComponentArray)
         {
+            for (int i = 0; i < denseComponentMap.size(); i++)
+            {
+                int componentID = denseComponentMap[i];
+                int byteSize = ComponentInfo::GetByteSize(componentID);
+                auto moveConstructor = ComponentInfo::GetMoveConstructor(componentID);
+                for (int j = 0; j < entityCount; j++)
+                {
+                    void* component = sparseComponentArray[componentID].at(j, byteSize);
+                    ComponentInfo::GetDestructor(componentID)(component);
+                }
+            }
+            entityCount = 0;
             delete[] sparseComponentArray;
             sparseComponentArray = nullptr;
         }
@@ -283,14 +266,17 @@ namespace ECS
         for (int i = 0; i < denseComponentMap.size(); i++)
         {
             int componentID = denseComponentMap[i];
+            int byteSize = ComponentInfo::GetByteSize(componentID);
+            auto moveConstructor = ComponentInfo::GetMoveConstructor(componentID);
+
             if (newArchetype->componentMask.GetBit(componentID))
-                newArchetype->sparseComponentArray[componentID].append(sparseComponentArray->at(index, ComponentInfo::GetByteSize(componentID)), newArchetype->entityCount, ComponentInfo::GetByteSize(componentID));
+                newArchetype->sparseComponentArray[componentID].append(sparseComponentArray->at(index, byteSize), newArchetype->entityCount, byteSize, moveConstructor);
             else
             {
-                void* component = sparseComponentArray[componentID].at(index, ComponentInfo::GetByteSize(componentID));
+                void* component = sparseComponentArray[componentID].at(index, byteSize);
                 ComponentInfo::GetDestructor(componentID)(component);
             }
-            sparseComponentArray[componentID].pop(index, entityCount, ComponentInfo::GetByteSize(componentID));
+            sparseComponentArray[componentID].pop(index, entityCount, byteSize, moveConstructor);
         }
 
         entityReferences.at<Entity*>(index)->archetypeID = newArchetype - &ArchetypePool::archetypes[0];
@@ -309,10 +295,14 @@ namespace ECS
         for (int i = 0; i < denseComponentMap.size(); i++)
         {
             int componentID = denseComponentMap[i];
-            void* component = sparseComponentArray[componentID].at(index, ComponentInfo::GetByteSize(componentID));
+            int byteSize = ComponentInfo::GetByteSize(componentID);
+            auto moveConstructor = ComponentInfo::GetMoveConstructor(componentID);
+
+            void* component = sparseComponentArray[componentID].at(index, byteSize);
             ComponentInfo::GetDestructor(componentID)(component);
-            sparseComponentArray[componentID].pop(index, entityCount, ComponentInfo::GetByteSize(componentID));
+            sparseComponentArray[componentID].pop(index, entityCount, byteSize, moveConstructor);
         }
+        void* p = sparseComponentArray[0].data();
         entityReferences.pop(index, entityCount, sizeof(Entity*));
         Entity& entity = *entityReferences.at<Entity*>(index);
         entity.id = index;
@@ -323,17 +313,24 @@ namespace ECS
     {
         for (int i = 0; i < denseComponentMap.size(); i++)
         {
-            int index = denseComponentMap[i];
-            sparseComponentArray[index].reserve(entityCapacity, newCapacity, ComponentInfo::GetByteSize(index));
+            int componentID = denseComponentMap[i];
+            int byteSize = ComponentInfo::GetByteSize(componentID);
+            auto moveConstructor = ComponentInfo::GetMoveConstructor(componentID);
+
+            sparseComponentArray[componentID].reserve(entityCapacity, newCapacity, byteSize, moveConstructor);
         }
         entityReferences.reserve(entityCapacity, newCapacity, sizeof(Entity*));
 
         entityCapacity = newCapacity;
     }
 
+    std::vector<Archetype> ArchetypePool::archetypes = {};
 
     Archetype* ArchetypePool::AddArchetype(Archetype&& archetype)
     {
+        auto it = std::find_if(archetypes.begin(), archetypes.end(), [&archetype](const Archetype& a) {return archetype.componentMask == a.componentMask; });
+        assert(it == archetypes.end() && "Trying to add archetype with non unique component mask");
+
         archetypes.emplace_back(std::move(archetype));
         return &archetypes.back();
     }
@@ -363,4 +360,5 @@ namespace ECS
 
         return quarry;
     }
+
 }

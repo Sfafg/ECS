@@ -35,6 +35,11 @@ void PopbackArray::append(const void* element, int size, int byteSize)
     memcpy(at(size, byteSize), element, byteSize);
 }
 
+void PopbackArray::append(void* element, int size, int byteSize, void(*moveConstructor)(void*, void*))
+{
+    moveConstructor(at(size, byteSize), element);
+}
+
 void PopbackArray::pop(int index, int size, int byteSize)
 {
     assert(0 <= index && index < size && "Popping outside the range");
@@ -42,6 +47,15 @@ void PopbackArray::pop(int index, int size, int byteSize)
         return;
 
     memcpy(at(index, byteSize), at(size - 1, byteSize), byteSize);
+}
+
+void PopbackArray::pop(int index, int size, int byteSize, void(*moveConstructor)(void*, void*))
+{
+    assert(0 <= index && index < size && "Popping outside the range");
+    if (index == size - 1)
+        return;
+
+    moveConstructor(at(index, byteSize), at(size - 1, byteSize));
 }
 
 void PopbackArray::reserve(int oldCapacity, int newCapacity, int byteSize)
@@ -56,6 +70,18 @@ void PopbackArray::reserve(int oldCapacity, int newCapacity, int byteSize)
         if (m_data)
             free(m_data);
     }
+
+    m_data = newComponents;
+}
+
+void PopbackArray::reserve(int oldCapacity, int newCapacity, int byteSize, void(*moveConstructor)(void*, void*))
+{
+    void* newComponents = malloc(newCapacity * byteSize);
+    for (int i = 0; i < (oldCapacity < newCapacity ? oldCapacity : newCapacity); i++)
+        moveConstructor((char*) newComponents + i * byteSize, (char*) m_data + i * byteSize);
+
+    if (m_data)
+        free(m_data);
 
     m_data = newComponents;
 }
