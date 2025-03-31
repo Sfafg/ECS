@@ -42,7 +42,7 @@ namespace ECS
 	{
 		std::swap(archetypeID, rhs.archetypeID);
 		std::swap(id, rhs.id);
-		if (archetypeID != -1) ArchetypePool::Get(archetypeID).entityReferences.at<Entity*>(id) = this;
+		if (archetypeID != -1) ArchetypePool::GetArchetypes()[archetypeID].entityReferences.at<Entity*>(id) = this;
 	}
 
 	Entity& Entity::operator=(Entity&& rhs)
@@ -51,7 +51,7 @@ namespace ECS
 		{
 			std::swap(archetypeID, rhs.archetypeID);
 			std::swap(id, rhs.id);
-			if (archetypeID != -1) ArchetypePool::Get(archetypeID).entityReferences.at<Entity*>(id) = this;
+			if (archetypeID != -1) ArchetypePool::GetArchetypes()[archetypeID].entityReferences.at<Entity*>(id) = this;
 		}
 
 		return *this;
@@ -61,7 +61,7 @@ namespace ECS
 	{
 		if (archetypeID == -1) return;
 
-		Archetype& archetype = ArchetypePool::Get(archetypeID);
+		Archetype& archetype = ArchetypePool::GetArchetypes()[archetypeID];
 		archetype.RemoveEntity(id);
 
 		id = 0;
@@ -70,24 +70,22 @@ namespace ECS
 
 	bool Entity::HasComponent(int componentID) const
 	{
-		if (archetypeID >= ArchetypePool::size()) return false;
-		return ArchetypePool::Get(archetypeID).denseComponentMap.contains(componentID);
+		if (archetypeID >= ArchetypePool::GetArchetypes().size()) return false;
+		return ArchetypePool::GetArchetypes()[archetypeID].denseComponentMap.contains(componentID);
 	}
 
 	void* Entity::GetComponent(int componentID)
 	{
-		if (archetypeID >= ArchetypePool::size()) return nullptr;
-		return ArchetypePool::Get(archetypeID)
-			.sparseComponentArray[componentID]
-			.at(id, ComponentInfo::GetByteSize(componentID));
+		if (archetypeID >= ArchetypePool::GetArchetypes().size()) return nullptr;
+		return ArchetypePool::GetArchetypes()[archetypeID].sparseComponentArray[componentID].at(
+			id, ComponentInfo::GetByteSize(componentID));
 	}
 
 	const void* Entity::GetComponent(int componentID) const
 	{
-		if (archetypeID >= ArchetypePool::size()) return nullptr;
-		return ArchetypePool::Get(archetypeID)
-			.sparseComponentArray[componentID]
-			.at(id, ComponentInfo::GetByteSize(componentID));
+		if (archetypeID >= ArchetypePool::GetArchetypes().size()) return nullptr;
+		return ArchetypePool::GetArchetypes()[archetypeID].sparseComponentArray[componentID].at(
+			id, ComponentInfo::GetByteSize(componentID));
 	}
 
 	Archetype::Archetype() : sparseComponentArray(nullptr), entityCount(0), entityCapacity(0) {}
@@ -95,7 +93,11 @@ namespace ECS
 	Archetype::Archetype(const std::set<int>& componentIDs)
 		: entityCount(0), entityCapacity(0), denseComponentMap(componentIDs)
 	{
-		sparseComponentArray = new PopbackArray[componentIDs.size()];
+		int max = 0;
+		for (auto&& i : componentIDs)
+			max = i + 1 > max ? i + 1 : max;
+
+		sparseComponentArray = new PopbackArray[max];
 	}
 
 	Archetype::Archetype(Archetype&& rhs) : Archetype()
@@ -220,13 +222,6 @@ namespace ECS
 
 		archetypes.emplace_back(std::move(archetype));
 		return &archetypes.back();
-	}
-
-	Archetype& ArchetypePool::Get(int index)
-	{
-		assert(0 <= index && index < ArchetypePool::archetypes.size() && "Invalid Archetype index");
-
-		return archetypes[index];
 	}
 
 	Archetype* ArchetypePool::GetArchetype(const std::set<int>& componentsID)

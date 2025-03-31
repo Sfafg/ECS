@@ -1,13 +1,62 @@
 #pragma once
 #include "PopbackArray.h"
 #include <cassert>
+#include <functional>
+#include <iostream>
 #include <set>
 #include <span>
+#include <tuple>
 #include <vector>
 
 namespace ECS
 {
 static consteval int ceil(double num) { return (int)num + (num != int(num)); }
+template <typename T> class MultiIterator
+{
+	std::vector<std::span<T>> containers;
+	unsigned int currContainer = 0;
+	unsigned int currElement = 0;
+
+  public:
+	MultiIterator() {}
+	MultiIterator(const std::vector<std::span<T>> &containers) : containers(containers) {}
+
+	T &operator*() { return containers[currContainer][currElement]; }
+	MultiIterator begin() { return MultiIterator(containers); }
+	MultiIterator end()
+	{
+		MultiIterator r(containers);
+		r.currContainer = containers.size();
+		r.currElement = 0;
+		return r;
+	}
+	MultiIterator &operator++()
+	{
+		currElement++;
+		if (containers[currContainer].size() <= currElement)
+		{
+			currElement = 0;
+			currContainer++;
+		};
+
+		return *this;
+	}
+
+	bool operator!=(const MultiIterator &it) const
+	{
+		if (containers.size() != it.containers.size() || currContainer != it.currContainer ||
+			currElement != it.currElement)
+			return true;
+
+		for (int i = 0; i < containers.size(); i++)
+		{
+			if (containers[i].begin() != it.containers[i].begin()) return true;
+		}
+		return false;
+	}
+
+	friend class ArchetypePool;
+};
 
 template <typename TComponent> struct Component;
 template <typename TComponent>
@@ -61,8 +110,8 @@ class ComponentInfo
 };
 
 /// @brief Component class, every component must inherit from this class.
-/// Memory address of a component is not guaranteed to be static, and only the destructor is applied to the components.
-/// Relocation is done by simply copying the data inside of the component.
+/// Memory address of a component is not guaranteed to be static, and only the destructor is applied to the
+/// components. Relocation is done by simply copying the data inside of the component.
 /// @tparam T Component that is inheriting from this class (CRTP)
 template <typename T> class Component
 {
@@ -88,10 +137,10 @@ template <typename T> const int Component<T>::id = ComponentInfo::RegisterCompon
 /// @brief Entity class, representing a collection of components.
 class Entity
 {
+  public:
 	unsigned int archetypeID;
 	unsigned int id;
 
-  public:
 	/// @brief Constructor with components.
 	/// @tparam ...TComponents List of component types that will be added to the entity
 	/// @param ...components List of components that will be added to the entity
@@ -193,12 +242,7 @@ class ArchetypePool
 	/// @return pointer to the new archetype
 	static Archetype *AddArchetype(Archetype &&archetype);
 
-	/// @brief Gets archetype by it's id.
-	/// @param index archetype ID
-	/// @return archetype
-	static Archetype &Get(int index);
-
-	static int size() { return archetypes.size(); }
+	static std::span<Archetype> GetArchetypes() { return archetypes; }
 
 	/// @brief Gets archetype by it's mask.
 	/// @T param components
@@ -216,15 +260,30 @@ class ArchetypePool
 	/// @return archetype containing all components specified in mask
 	static Archetype *GetArchetype(const std::set<int> &componentsID);
 
+	template <ComponentDerived U> static MultiIterator<U> GetFiltered(std::function<bool(const Archetype &)> filter)
+	{
+		MultiIterator<U> results;
+		for (auto &&i : GetArchetypes())
+			if (filter(i)) results.containers.push_back(i.GetComponents<U>());
+
+		return results;
+	}
+
 	/// @brief Gets all archetypes containing all components specified in mask.
 	/// @T param mask
 	/// @return archetypes containing all components specified in mask
-	template <ComponentDerived... T> static std::vector<Archetype *> GetContaining()
+	template <ComponentDerived U, ComponentDerived... T> static MultiIterator<U> GetContaining()
 	{
 		std::set<int> ids;
+		ids.insert(U::id);
 		((ids.insert(T::id)), ...);
 
-		return GetContaining(ids);
+		auto arch = GetContaining(ids);
+
+		MultiIterator<U> results;
+		for (auto &&i : arch) results.containers.push_back(i->GetComponents<U>());
+
+		return results;
 	}
 
 	/// @brief Gets all archetypes containing all components specified in mask.
@@ -269,7 +328,7 @@ template <ComponentDerived T> void Entity::AddComponent(T &&component)
 	}
 	else
 	{
-		Archetype &archetype = ArchetypePool::Get(archetypeID);
+		Archetype &archetype = ArchetypePool::GetArchetypes()[archetypeID];
 
 		std::set<int> newComponentIDs = archetype.denseComponentMap;
 		newComponentIDs.insert(T::id);
@@ -286,7 +345,7 @@ template <ComponentDerived T> void Entity::AddComponent(T &&component)
 template <ComponentDerived T> void Entity::RemoveComponent()
 {
 	assert(HasComponent<T>() && "Trying to remove component that is not on an entity");
-	Archetype &archetype = ArchetypePool::Get(archetypeID);
+	Archetype &archetype = ArchetypePool::GetArchetypes()[archetypeID];
 	std::set<int> newComponentIDs = archetype.denseComponentMap;
 	newComponentIDs.erase(T::id);
 
@@ -319,5 +378,11 @@ template <ComponentDerived... TComponents> void Archetype::Push(Entity *entity, 
 	entity->archetypeID = this - &ArchetypePool::archetypes[0];
 	entityReferences.append(entity, entityCount);
 	entityCount++;
+}
+template <ComponentDerived T> std::span<T> Archetype::GetComponents()
+{
+	T *begin = (T *)sparseComponentArray[T::id].data();
+	T *end = begin + entityCount;
+	return std::span<T>(begin, end);
 }
 } // namespace ECS
