@@ -1,7 +1,6 @@
 #pragma once
 #include "PopbackArray.h"
 #include <cassert>
-#include <functional>
 #include <iostream>
 #include <set>
 #include <span>
@@ -11,53 +10,6 @@
 namespace ECS
 {
 static consteval int ceil(double num) { return (int)num + (num != int(num)); }
-template <typename T> class MultiIterator
-{
-	std::vector<std::span<T>> containers;
-	unsigned int currContainer = 0;
-	unsigned int currElement = 0;
-
-  public:
-	MultiIterator() {}
-	MultiIterator(const std::vector<std::span<T>> &containers) : containers(containers) {}
-
-	T &operator*() { return containers[currContainer][currElement]; }
-	MultiIterator begin() { return MultiIterator(containers); }
-	MultiIterator end()
-	{
-		MultiIterator r(containers);
-		r.currContainer = containers.size();
-		r.currElement = 0;
-		return r;
-	}
-	MultiIterator &operator++()
-	{
-		currElement++;
-		if (containers[currContainer].size() <= currElement)
-		{
-			currElement = 0;
-			currContainer++;
-		};
-
-		return *this;
-	}
-
-	bool operator!=(const MultiIterator &it) const
-	{
-		if (containers.size() != it.containers.size() || currContainer != it.currContainer ||
-			currElement != it.currElement)
-			return true;
-
-		for (int i = 0; i < containers.size(); i++)
-		{
-			if (containers[i].begin() != it.containers[i].begin()) return true;
-		}
-		return false;
-	}
-
-	friend class ArchetypePool;
-};
-
 template <typename TComponent> struct Component;
 template <typename TComponent>
 concept ComponentDerived = std::is_base_of_v<Component<TComponent>, TComponent>;
@@ -116,7 +68,7 @@ class ComponentInfo
 template <typename T> class Component
 {
 	/// @brief Unique ID used to associate components with things like byte size and destructors.
-	const static int id;
+	const static int ___componentID;
 
 	/// @brief Function invoking child's destructor.
 	/// @param component Pointer to child's memory address
@@ -132,7 +84,7 @@ template <typename T> class Component
 	friend class Archetype;
 	friend class ArchetypePool;
 };
-template <typename T> const int Component<T>::id = ComponentInfo::RegisterComponent<T>();
+template <typename T> const int Component<T>::___componentID = ComponentInfo::RegisterComponent<T>();
 
 /// @brief Entity class, representing a collection of components.
 class Entity
@@ -166,17 +118,17 @@ class Entity
 	/// @brief Checks if entity has a component.
 	/// @tparam T type of checked component
 	/// @return true if component is present, false otherwise
-	template <ComponentDerived T> bool HasComponent() const { return HasComponent(T::id); }
+	template <ComponentDerived T> bool HasComponent() const { return HasComponent(T::___componentID); }
 
 	/// @brief Gets a reference to a component from entity.
 	/// @tparam T type of component
 	/// @return reference to the component
-	template <ComponentDerived T> T &GetComponent() { return *(T *)GetComponent(T::id); }
+	template <ComponentDerived T> T &GetComponent() { return *(T *)GetComponent(T::___componentID); }
 
 	/// @brief Gets a reference to a component from entity.
 	/// @tparam T type of component
 	/// @return reference to the component
-	template <ComponentDerived T> const T &GetComponent() const { return *(T *)GetComponent(T::id); }
+	template <ComponentDerived T> const T &GetComponent() const { return *(T *)GetComponent(T::___componentID); }
 
   private:
 	bool HasComponent(int componentID) const;
@@ -185,6 +137,67 @@ class Entity
 
 	friend class Archetype;
 };
+
+template <ComponentDerived... T> struct Exclude
+{
+};
+template <typename T>
+concept Excludion = requires { []<ComponentDerived... U>(Exclude<U...>) {}(std::declval<T>()); };
+
+template <Excludion E, ComponentDerived... T> struct EntityRangeIterator
+{
+	size_t archetypeID;
+	EntityRangeIterator(size_t archetypeID);
+
+	std::tuple<std::span<T>...> operator*() const;
+
+	EntityRangeIterator &operator++();
+	bool operator!=(const EntityRangeIterator &rhs) const;
+
+  private:
+	bool IsCurrentArchetypeOk() const;
+};
+
+template <Excludion E, ComponentDerived... T> struct EntityRangeView
+{
+	EntityRangeIterator<E, T...> begin();
+	EntityRangeIterator<E, T...> end();
+};
+
+template <Excludion E, ComponentDerived... T> struct EntityIterator
+{
+	EntityRangeIterator<E, T...> entityRange;
+	size_t entityID;
+	EntityIterator(EntityRangeIterator<E, T...> entityRange, size_t entityID);
+
+	std::tuple<T &...> operator*() const;
+
+	EntityIterator &operator++();
+	bool operator!=(const EntityIterator &rhs) const;
+};
+
+template <Excludion E, ComponentDerived... T> struct EntityView
+{
+	EntityIterator<E, T...> begin();
+	EntityIterator<E, T...> end();
+};
+
+template <ComponentDerived... T> static EntityRangeView<Exclude<>, T...> GetComponentsArrays()
+{
+	return EntityRangeView<Exclude<>, T...>();
+}
+template <Excludion E, ComponentDerived... T> static EntityRangeView<E, T...> GetComponentsArrays()
+{
+	return EntityRangeView<E, T...>();
+}
+template <Excludion E, ComponentDerived... T> static EntityView<E, T...> GetComponents()
+{
+	return EntityView<E, T...>();
+}
+template <ComponentDerived... T> static EntityView<Exclude<>, T...> GetComponents()
+{
+	return EntityView<Exclude<>, T...>();
+}
 
 /// @brief Class holding entities with same component types.
 struct Archetype
@@ -229,6 +242,8 @@ struct Archetype
 	/// @tparam T component type
 	/// @return span of components of type T, of all entities in archetype.
 	template <ComponentDerived T> std::span<T> GetComponents();
+
+	template <ComponentDerived T> bool StoresComponent();
 };
 
 /// @brief Class holding an array of archetypes with unique component masks.
@@ -247,52 +262,19 @@ class ArchetypePool
 	/// @brief Gets archetype by it's mask.
 	/// @T param components
 	/// @return archetype
-	template <ComponentDerived... T> static Archetype *GetArchetype()
-	{
-		std::set<int> ids;
-		((ids.insert(T::id)), ...);
-
-		return GetArchetype(ids);
-	}
+	template <ComponentDerived... T> static Archetype *GetArchetype();
 
 	/// @brief Get archetype by it's mask.
 	/// @param componentsID mask
 	/// @return archetype containing all components specified in mask
 	static Archetype *GetArchetype(const std::set<int> &componentsID);
 
-	template <ComponentDerived U> static MultiIterator<U> GetFiltered(std::function<bool(const Archetype &)> filter)
-	{
-		MultiIterator<U> results;
-		for (auto &&i : GetArchetypes())
-			if (filter(i)) results.containers.push_back(i.GetComponents<U>());
-
-		return results;
-	}
-
-	/// @brief Gets all archetypes containing all components specified in mask.
-	/// @T param mask
-	/// @return archetypes containing all components specified in mask
-	template <ComponentDerived U, ComponentDerived... T> static MultiIterator<U> GetContaining()
-	{
-		std::set<int> ids;
-		ids.insert(U::id);
-		((ids.insert(T::id)), ...);
-
-		auto arch = GetContaining(ids);
-
-		MultiIterator<U> results;
-		for (auto &&i : arch) results.containers.push_back(i->GetComponents<U>());
-
-		return results;
-	}
-
-	/// @brief Gets all archetypes containing all components specified in mask.
-	/// @param componentsID mask
-	/// @return archetypes containing all components specified in mask
-	static std::vector<Archetype *> GetContaining(const std::set<int> &componentsID);
-
 	friend Archetype;
+	template <Excludion E, ComponentDerived... T> friend struct EntityRangeIterator;
+	template <Excludion E, ComponentDerived... T> friend struct EntityRangeView;
+	template <Excludion E, ComponentDerived... T> friend struct EntityView;
 };
+
 } // namespace ECS
 
 namespace ECS
@@ -304,11 +286,10 @@ template <ComponentDerived... TComponents> Entity::Entity(TComponents &&...compo
 		assert(!componentsID.contains(id) && "Trying to add multiple components of same type to an entity");
 		componentsID.insert(id);
 	};
-	((setComponentsAndAssertUnique(TComponents::id)), ...);
+	((setComponentsAndAssertUnique(TComponents::___componentID)), ...);
 
 	Archetype *archetype = nullptr;
-	if (!(archetype = ArchetypePool::GetArchetype<TComponents...>()))
-		archetype = ArchetypePool::AddArchetype(componentsID);
+	if (!(archetype = ArchetypePool::GetArchetype(componentsID))) archetype = ArchetypePool::AddArchetype(componentsID);
 
 	archetype->Push(this, std::move(components)...);
 }
@@ -319,7 +300,7 @@ template <ComponentDerived T> void Entity::AddComponent(T &&component)
 	if (archetypeID == -1)
 	{
 		std::set<int> newComponentIDs;
-		newComponentIDs.insert(T::id);
+		newComponentIDs.insert(T::___componentID);
 
 		Archetype *newArchetype = nullptr;
 		if (!(newArchetype = ArchetypePool::GetArchetype(newComponentIDs)))
@@ -328,30 +309,33 @@ template <ComponentDerived T> void Entity::AddComponent(T &&component)
 	}
 	else
 	{
-		Archetype &archetype = ArchetypePool::GetArchetypes()[archetypeID];
+		Archetype *archetype = &ArchetypePool::GetArchetypes()[archetypeID];
 
-		std::set<int> newComponentIDs = archetype.denseComponentMap;
-		newComponentIDs.insert(T::id);
+		std::set<int> newComponentIDs = archetype->denseComponentMap;
+		newComponentIDs.insert(T::___componentID);
 
 		Archetype *newArchetype = nullptr;
 		if (!(newArchetype = ArchetypePool::GetArchetype(newComponentIDs)))
+		{
 			newArchetype = ArchetypePool::AddArchetype(Archetype(newComponentIDs));
+			archetype = &ArchetypePool::GetArchetypes()[archetypeID];
+		}
 
-		archetype.MoveEntity(id, newArchetype);
-		newArchetype->sparseComponentArray[T::id].emplace_back(component, newArchetype->entityCount);
+		archetype->MoveEntity(id, newArchetype);
+		newArchetype->sparseComponentArray[T::___componentID].emplace_back(component, newArchetype->entityCount);
 	}
 }
 
 template <ComponentDerived T> void Entity::RemoveComponent()
 {
 	assert(HasComponent<T>() && "Trying to remove component that is not on an entity");
-	Archetype &archetype = ArchetypePool::GetArchetypes()[archetypeID];
-	std::set<int> newComponentIDs = archetype.denseComponentMap;
-	newComponentIDs.erase(T::id);
+	Archetype *archetype = &ArchetypePool::GetArchetypes()[archetypeID];
+	std::set<int> newComponentIDs = archetype->denseComponentMap;
+	newComponentIDs.erase(T::___componentID);
 
 	if (newComponentIDs.empty())
 	{
-		archetype.RemoveEntity(id);
+		archetype->RemoveEntity(id);
 		id = 0;
 		archetypeID = -1;
 		return;
@@ -359,30 +343,132 @@ template <ComponentDerived T> void Entity::RemoveComponent()
 
 	Archetype *newArchetype = nullptr;
 	if (!(newArchetype = ArchetypePool::GetArchetype(newComponentIDs)))
+	{
 		newArchetype = ArchetypePool::AddArchetype(Archetype(newComponentIDs));
+		archetype = &ArchetypePool::GetArchetypes()[archetypeID];
+	}
 
-	archetype.MoveEntity(id, newArchetype);
+	archetype->MoveEntity(id, newArchetype);
 }
 
 template <ComponentDerived... TComponents> void Archetype::Push(Entity *entity, TComponents &&...components)
 {
 	std::set<int> newComponentIDs;
-	((newComponentIDs.insert(TComponents::id)), ...);
+	((newComponentIDs.insert(TComponents::___componentID)), ...);
 	assert(newComponentIDs == denseComponentMap && "Archetype component mask does not match provided components");
 
 	if (entityCount + 1 >= entityCapacity) Reserve((entityCapacity + 1) * 1.7);
 
-	((sparseComponentArray[TComponents::id].emplace_back(std::move(components), entityCount)), ...);
+	((sparseComponentArray[TComponents::___componentID].emplace_back(std::move(components), entityCount)), ...);
 
 	entity->id = entityCount;
 	entity->archetypeID = this - &ArchetypePool::archetypes[0];
 	entityReferences.append(entity, entityCount);
 	entityCount++;
 }
+
 template <ComponentDerived T> std::span<T> Archetype::GetComponents()
 {
-	T *begin = (T *)sparseComponentArray[T::id].data();
+	T *begin = (T *)sparseComponentArray[T::___componentID].data();
 	T *end = begin + entityCount;
+
 	return std::span<T>(begin, end);
+}
+
+template <ComponentDerived T> bool Archetype::StoresComponent()
+{
+	return denseComponentMap.contains(T::___componentID);
+}
+
+template <Excludion E, ComponentDerived... T>
+EntityRangeIterator<E, T...>::EntityRangeIterator(size_t archetypeID) : archetypeID(archetypeID)
+{
+	if (this->archetypeID < ArchetypePool::archetypes.size())
+		while (this->archetypeID < ArchetypePool::archetypes.size() && !IsCurrentArchetypeOk()) ++this->archetypeID;
+}
+
+template <Excludion E, ComponentDerived... T>
+std::tuple<std::span<T>...> EntityRangeIterator<E, T...>::operator*() const
+{
+	return {
+		(ArchetypePool::archetypes[archetypeID].GetComponents<T>())...,
+	};
+}
+
+template <Excludion E, ComponentDerived... T> EntityRangeIterator<E, T...> &EntityRangeIterator<E, T...>::operator++()
+{
+	while (++archetypeID < ArchetypePool::archetypes.size() && !IsCurrentArchetypeOk())
+		;
+	return *this;
+}
+
+template <Excludion E, ComponentDerived... T>
+bool EntityRangeIterator<E, T...>::operator!=(const EntityRangeIterator &rhs) const
+{
+	return archetypeID != rhs.archetypeID;
+}
+
+template <Excludion E, ComponentDerived... T> bool EntityRangeIterator<E, T...>::IsCurrentArchetypeOk() const
+{
+
+	auto handleExcludion = []<ComponentDerived... U>(size_t archetypeID, Exclude<U...> *e) {
+		return (!ArchetypePool::archetypes[archetypeID].template StoresComponent<U>() && ...);
+	};
+	return ArchetypePool::archetypes[archetypeID].entityCount != 0 && handleExcludion(archetypeID, (E *)0) &&
+		   (ArchetypePool::archetypes[archetypeID].StoresComponent<T>() && ...);
+}
+
+template <Excludion E, ComponentDerived... T> EntityRangeIterator<E, T...> EntityRangeView<E, T...>::begin()
+{
+	return EntityRangeIterator<E, T...>(0);
+}
+template <Excludion E, ComponentDerived... T> EntityRangeIterator<E, T...> EntityRangeView<E, T...>::end()
+{
+	return EntityRangeIterator<E, T...>(ArchetypePool::archetypes.size());
+}
+
+template <Excludion E, ComponentDerived... T>
+EntityIterator<E, T...>::EntityIterator(EntityRangeIterator<E, T...> entityRange, size_t entityID)
+	: entityRange(entityRange), entityID(entityID)
+{
+}
+
+template <Excludion E, ComponentDerived... T> std::tuple<T &...> EntityIterator<E, T...>::operator*() const
+{
+	return {
+		(std::get<std::span<T>>(*entityRange)[entityID])...,
+	};
+}
+
+template <Excludion E, ComponentDerived... T> EntityIterator<E, T...> &EntityIterator<E, T...>::operator++()
+{
+	++entityID;
+	if (entityID < std::get<0>(*entityRange).size()) return *this;
+
+	entityID = 0;
+	++entityRange;
+	return *this;
+}
+
+template <Excludion E, ComponentDerived... T> bool EntityIterator<E, T...>::operator!=(const EntityIterator &rhs) const
+{
+	return entityRange != rhs.entityRange || entityID != rhs.entityID;
+}
+
+template <Excludion E, ComponentDerived... T> EntityIterator<E, T...> EntityView<E, T...>::begin()
+{
+	return EntityIterator<E, T...>(EntityRangeView<E, T...>().begin(), 0);
+}
+template <Excludion E, ComponentDerived... T> EntityIterator<E, T...> EntityView<E, T...>::end()
+{
+	return EntityIterator<E, T...>(EntityRangeView<E, T...>().end(), 0);
+}
+
+template <ComponentDerived... T> Archetype *ArchetypePool::GetArchetype()
+{
+	std::set<int> ids;
+	((ids.insert(T::___componentID)), ...);
+
+	return GetArchetype(ids);
 }
 } // namespace ECS

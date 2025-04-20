@@ -94,8 +94,7 @@ namespace ECS
 		: entityCount(0), entityCapacity(0), denseComponentMap(componentIDs)
 	{
 		int max = 0;
-		for (auto&& i : componentIDs)
-			max = i + 1 > max ? i + 1 : max;
+		for (auto&& i : componentIDs) max = i + 1 > max ? i + 1 : max;
 
 		sparseComponentArray = new PopbackArray[max];
 	}
@@ -127,9 +126,8 @@ namespace ECS
 	{
 		if (sparseComponentArray)
 		{
-			for (auto i = denseComponentMap.begin(); i != denseComponentMap.end(); i++)
+			for (auto& componentID : denseComponentMap)
 			{
-				int componentID = *i;
 				int byteSize = ComponentInfo::GetByteSize(componentID);
 				auto moveConstructor = ComponentInfo::GetMoveConstructor(componentID);
 				for (int j = 0; j < entityCount; j++)
@@ -149,15 +147,14 @@ namespace ECS
 		if (newArchetype->entityCount + 1 >= newArchetype->entityCapacity)
 			newArchetype->Reserve((newArchetype->entityCapacity + 1) * 1.7);
 
-		for (auto i = denseComponentMap.begin(); i != denseComponentMap.end(); i++)
+		for (auto& componentID : denseComponentMap)
 		{
-			int componentID = *i;
 			int byteSize = ComponentInfo::GetByteSize(componentID);
 			auto moveConstructor = ComponentInfo::GetMoveConstructor(componentID);
 
 			if (newArchetype->denseComponentMap.contains(componentID))
 				newArchetype->sparseComponentArray[componentID].append(
-					sparseComponentArray->at(index, byteSize), newArchetype->entityCount, byteSize, moveConstructor);
+					sparseComponentArray[componentID].at(index, byteSize), newArchetype->entityCount, byteSize, moveConstructor);
 			else
 			{
 				void* component = sparseComponentArray[componentID].at(index, byteSize);
@@ -171,7 +168,8 @@ namespace ECS
 
 		newArchetype->entityReferences.append(entityReferences.at<Entity*>(index), newArchetype->entityCount);
 		entityReferences.pop<Entity*>(index, entityCount);
-		entityReferences.at<Entity*>(index)->id = index;
+		if (index < entityCount - 1)
+			entityReferences.at<Entity*>(index)->id = index;
 
 		entityCount--;
 		newArchetype->entityCount++;
@@ -179,9 +177,8 @@ namespace ECS
 
 	void Archetype::RemoveEntity(int index)
 	{
-		for (auto i = denseComponentMap.begin(); i != denseComponentMap.end(); i++)
+		for (auto& componentID : denseComponentMap)
 		{
-			int componentID = *i;
 			int byteSize = ComponentInfo::GetByteSize(componentID);
 			auto moveConstructor = ComponentInfo::GetMoveConstructor(componentID);
 
@@ -189,18 +186,16 @@ namespace ECS
 			ComponentInfo::GetDestructor(componentID)(component);
 			sparseComponentArray[componentID].pop(index, entityCount, byteSize, moveConstructor);
 		}
-		void* p = sparseComponentArray[0].data();
 		entityReferences.pop(index, entityCount, sizeof(Entity*));
-		Entity& entity = *entityReferences.at<Entity*>(index);
-		entity.id = index;
+		if (index < entityCount - 1)
+			entityReferences.at<Entity*>(index)->id = index;
 		entityCount--;
 	}
 
 	void Archetype::Reserve(int newCapacity)
 	{
-		for (auto i = denseComponentMap.begin(); i != denseComponentMap.end(); i++)
+		for (auto& componentID : denseComponentMap)
 		{
-			int componentID = *i;
 			int byteSize = ComponentInfo::GetByteSize(componentID);
 			auto moveConstructor = ComponentInfo::GetMoveConstructor(componentID);
 
@@ -226,29 +221,8 @@ namespace ECS
 
 	Archetype* ArchetypePool::GetArchetype(const std::set<int>& componentsID)
 	{
-		for (auto i = archetypes.begin(); i != archetypes.end(); i++)
-			if (i->denseComponentMap == componentsID) return &i[0];
+		for (auto& i : archetypes)
+			if (i.denseComponentMap == componentsID) return &i;
 		return nullptr;
-	}
-
-	std::vector<Archetype*> ArchetypePool::GetContaining(const std::set<int>& componentsID)
-	{
-		std::vector<Archetype*> results;
-		for (auto i = archetypes.begin(); i != archetypes.end(); i++)
-		{
-			if (i->denseComponentMap.size() < componentsID.size()) continue;
-
-			bool containsAll = true;
-			for (auto j = componentsID.begin(); j != componentsID.end(); j++)
-			{
-				if (!i->denseComponentMap.contains(*j))
-				{
-					containsAll = false;
-					break;
-				}
-			}
-			if (containsAll) results.push_back(&i[0]);
-		}
-		return results;
 	}
 } // namespace ECS

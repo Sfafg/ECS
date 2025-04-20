@@ -1,47 +1,81 @@
+#include "ECS.h"
+#include "math.h"
+#include <chrono>
 #include <iostream>
 #include <string>
-#include "ECS.h"
+
 using namespace ECS;
 
-
-struct Comp : public Component<Comp>
+struct Name : public Component<Name>
 {
-    std::string name;
+	std::string name;
 
-    Comp(std::string name) : name(name) {}
+	Name(std::string &&name) : name(std::move(name)) {}
+
+	Name(Name &&rhs) noexcept : name(std::move(rhs.name)) {}
+
+	Name &operator=(Name &&rhs)
+	{
+		if (&rhs != this) std::swap(name, rhs.name);
+		return *this;
+	}
+	~Name() { std::cout << "Destroy Name" << name << '\n'; }
 };
 
-struct Comp1 : public Component<Comp1>
+struct Test : public Component<Test>
 {
-    std::string name;
+	std::string name;
 
-    Comp1(std::string name) : name(name) {}
-};
-struct Comp2 : public Component<Comp2>
-{
-    std::string name;
+	Test(std::string &&name) : name(std::move(name)) {}
 
-    Comp2(std::string name) : name(name) {}
+	Test(Test &&rhs) noexcept : name(std::move(rhs.name)) {}
+
+	Test &operator=(Test &&rhs)
+	{
+		if (&rhs != this) std::swap(name, rhs.name);
+		return *this;
+	}
+	~Test() { std::cout << "Destroy Test" << name << '\n'; }
 };
 
 int main()
 {
-    ECS::AddEntity(Comp("impostor"), Comp2("amogus"));
-    ECS::AddEntity(Comp("impostor1"));
+	/* { */
+	/* 	Entity a; */
+	/* 	a.AddComponent(Name("Test")); */
+	/* 	std::cout << a.HasComponent<Name>() << '\n'; */
+	/* 	std::cout << a.GetComponent<Name>().name << '\n'; */
+	/* 	a.RemoveComponent<Name>(); */
+	/* 	a.AddComponent(Name("Test")); */
+	/* 	std::cout << a.HasComponent<Name>() << '\n'; */
+	/* 	std::cout << a.GetComponent<Name>().name << '\n'; */
+	/* } */
+	Entity a(Name("A"));
+	std::cout << '\n' << '\n';
+	std::cout << a.id << '\n';
+	{
+		Entity b(Name("B"));
+		Entity c(Name("C"), Test("C"));
+		Entity d(Name("D"));
 
+		std::cout << "=== Iterator test ===" << '\n';
+		for (auto &&[name, test] : ECS::GetComponents<Name, Test>())
+			std::cout << name.name << '\t' << test.name << '\n';
 
-    for (int i = 0; i < ArchetypePool::archetypes[0].entityCount; i++)
-    {
-        std::cout
-            << ArchetypePool::archetypes[0].GetComponent<Comp>(i).name << '\n'
-            << ArchetypePool::archetypes[0].GetComponent<Comp2>(i).name << '\n';
-    }
-
-    for (int i = 0; i < ArchetypePool::archetypes[1].entityCount; i++)
-    {
-        std::cout
-            << ArchetypePool::archetypes[1].GetComponent<Comp>(i).name << '\n';
-    }
-
-    return 0;
+		c.~Entity();
+		std::cout << '\n' << '\n';
+		for (auto &&[name, test] : ECS::GetComponents<Name, Test>())
+			std::cout << name.name << '\t' << test.name << '\n';
+		std::cout << '\n';
+		for (auto &&[i] : ECS::GetComponents<Name>()) std::cout << i.name << '\n';
+	}
+	/*  */
+	/* std::cout << '\n' << '\n'; */
+	/* std::cout << a.id << '\n'; */
+	/* { */
+	/* 	Entity *b = new Entity(Test("C")); */
+	/* } */
+	/* std::cout << '\n' << '\n'; */
+	/* std::cout << a.id << '\n'; */
+	return 0;
 }
