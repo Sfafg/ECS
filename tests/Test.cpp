@@ -64,21 +64,21 @@ int main()
 		int testIds[] = {1, 2};
 
 		int i = 0;
-		for (auto &&[name] : GetComponents<Name>())
+		for (auto &&[e, name] : GetComponents<Name>())
 			if (nameIds[i++] != name.id)
 			{
 				std::cout << "Failed Name at ID: " << name.id << " should be " << nameIds[i - 1] << '\n';
 				return 1;
 			}
 		i = 0;
-		for (auto &&[test] : GetComponents<Test>())
+		for (auto &&[e, test] : GetComponents<Test>())
 			if (testIds[i++] != test.id)
 			{
 				std::cout << "Failed Test at ID: " << test.id << " should be " << testIds[i - 1] << '\n';
 				return 1;
 			}
 
-		for (auto &&[name, test] : GetComponents<Name, Test>())
+		for (auto &&[e, name, test] : GetComponents<Name, Test>())
 			if (test.id != 1 || name.id != 6)
 			{
 				std::cout << "Failed Test and Name at ID: " << test.id << ", " << name.id << " should be 1, 6 " << '\n';
@@ -86,7 +86,7 @@ int main()
 			}
 
 		i = 0;
-		for (auto &&[test] : GetComponents<Exclude<Name>, Test>())
+		for (auto &&[e, test] : GetComponents<Exclude<Name>, Test>())
 			if (2 != test.id)
 			{
 				std::cout << "Failed Excluded Iteration Test at ID: " << test.id << " should be " << 2 << '\n';
@@ -94,7 +94,7 @@ int main()
 			}
 
 		entities.erase(entities.end() - 2);
-		for (auto &&[name, test] : GetComponents<Name, Test>())
+		for (auto &&[e, name, test] : GetComponents<Name, Test>())
 		{
 			std::cout << "Failed iterating over empty component set " << name.id << ", " << test.id << "\n";
 			return 1;
@@ -149,7 +149,7 @@ int main()
 			start = high_resolution_clock::now();
 			for (int n = 0; n < iterationCount; n++)
 			{
-				for (auto &&[p] : GetComponents<Particle>())
+				for (auto &&[e, p] : GetComponents<Particle>())
 				{
 					p.vy -= p.y * 0.1;
 					p.vx -= p.x * 0.1;
@@ -162,7 +162,7 @@ int main()
 		}
 
 		int i = 0;
-		for (auto &&[p] : GetComponents<Particle>())
+		for (auto &&[e, p] : GetComponents<Particle>())
 		{
 			if (p != particles[i++])
 			{
@@ -190,7 +190,7 @@ int main()
 			start = high_resolution_clock::now();
 			for (int n = 0; n < iterationCount; n++)
 			{
-				for (auto &&[p] : GetComponents<Particle>())
+				for (auto &&[e, p] : GetComponents<Particle>())
 				{
 					p.vy -= p.y * 0.1;
 					p.vx -= p.x * 0.1;
@@ -203,7 +203,7 @@ int main()
 		}
 
 		int i = 0;
-		for (auto &&[p] : GetComponents<Particle>())
+		for (auto &&[e, p] : GetComponents<Particle>())
 		{
 			if (p != particles[i++])
 			{
@@ -239,7 +239,7 @@ int main()
 			start = high_resolution_clock::now();
 			for (int n = 0; n < iterationCount; n++)
 			{
-				for (auto &&[p] : GetComponents<Particle>())
+				for (auto &&[e, p] : GetComponents<Particle>())
 				{
 					p.vy -= p.y * 0.1;
 					p.vx -= p.x * 0.1;
@@ -252,7 +252,7 @@ int main()
 		}
 
 		int i = 0;
-		for (auto &&[p] : GetComponents<Particle>()) i++;
+		for (auto &&[e, p] : GetComponents<Particle>()) i++;
 		if (i != particleCount)
 		{
 			std::cout << "Failed performance test: Impropper particle count\n";

@@ -149,7 +149,7 @@ template <Excludion E, ComponentDerived... T> struct EntityRangeIterator
 	size_t archetypeID;
 	EntityRangeIterator(size_t archetypeID);
 
-	std::tuple<std::span<T>...> operator*() const;
+	std::tuple<std::span<Entity *>, std::span<T>...> operator*() const;
 
 	EntityRangeIterator &operator++();
 	bool operator!=(const EntityRangeIterator &rhs) const;
@@ -170,7 +170,7 @@ template <Excludion E, ComponentDerived... T> struct EntityIterator
 	size_t entityID;
 	EntityIterator(EntityRangeIterator<E, T...> entityRange, size_t entityID);
 
-	std::tuple<T &...> operator*() const;
+	std::tuple<Entity &, T &...> operator*() const;
 
 	EntityIterator &operator++();
 	bool operator!=(const EntityIterator &rhs) const;
@@ -243,7 +243,14 @@ struct Archetype
 	/// @return span of components of type T, of all entities in archetype.
 	template <ComponentDerived T> std::span<T> GetComponents();
 
+	/// @brief Checks whether Archetype stores a component.
+	/// @tparam T component type
+	/// @return True if stores the component false otherwise.
 	template <ComponentDerived T> bool StoresComponent();
+
+	/// @brief Gets a span of entity pointers connected with the archetype
+	/// @return span of entity pointers.
+	std::span<Entity *> GetEntities();
 };
 
 /// @brief Class holding an array of archetypes with unique component masks.
@@ -388,9 +395,10 @@ EntityRangeIterator<E, T...>::EntityRangeIterator(size_t archetypeID) : archetyp
 }
 
 template <Excludion E, ComponentDerived... T>
-std::tuple<std::span<T>...> EntityRangeIterator<E, T...>::operator*() const
+std::tuple<std::span<Entity *>, std::span<T>...> EntityRangeIterator<E, T...>::operator*() const
 {
 	return {
+		ArchetypePool::archetypes[archetypeID].GetEntities(),
 		(ArchetypePool::archetypes[archetypeID].GetComponents<T>())...,
 	};
 }
@@ -433,9 +441,10 @@ EntityIterator<E, T...>::EntityIterator(EntityRangeIterator<E, T...> entityRange
 {
 }
 
-template <Excludion E, ComponentDerived... T> std::tuple<T &...> EntityIterator<E, T...>::operator*() const
+template <Excludion E, ComponentDerived... T> std::tuple<Entity &, T &...> EntityIterator<E, T...>::operator*() const
 {
 	return {
+		*std::get<0>(*entityRange)[entityID],
 		(std::get<std::span<T>>(*entityRange)[entityID])...,
 	};
 }
