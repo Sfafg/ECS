@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.30.1)
 project(ECS)
 
-option(ECS_BUILD_TESTS "Build tests" TRUE)
+option(ECS_BUILD_TESTS "Build tests" FALSE)
 
 set(TESTS_ROOT "${PROJECT_SOURCE_DIR}/tests")
 set(SRC_ROOT "${PROJECT_SOURCE_DIR}/src")
@@ -25,10 +25,10 @@ target_include_directories(ECS PUBLIC
     $<INSTALL_INTERFACE:include>
 )
 
-if(ECS_BUILD_TESTS){
+if(ECS_BUILD_TESTS)
     add_executable(ECSTest ${TESTS_ROOT}/Source.cpp)
     target_link_libraries(ECSTest PUBLIC ECS)
 
     add_executable(Test ${TESTS_ROOT}/Test.cpp)
     target_link_libraries(Test PUBLIC ECS)
-}
+endif()
